@@ -1,1 +1,1 @@
-# SSAC
+# SSAC (Steam Status Activity Check)
