@@ -2,12 +2,52 @@ import requests
 import time
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
+import os
+import json
+
+
+# Configuration file
+CONFIG_FILE = "config.json"
+
 
 # params
 steam_api_key = ""
 telegram_token = ""
 chat_id = None  # The chat ID will be obtained via the command /start
 steam_id = None  # steam_id will be provided by the user
+
+
+def load_config():
+    """Загружает токен Telegram и ключ Steam API из файла"""
+    global telegram_token, steam_api_key
+
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as file:
+                config = json.load(file)
+                telegram_token = config.get("telegram_token", "")
+                steam_api_key = config.get("steam_api_key", "")
+        except (json.JSONDecodeError, FileNotFoundError):
+            print("Ошибка чтения конфигурации, запрос новых данных...")
+    else:
+        print("Конфигурационный файл не найден, запрос новых данных...")
+
+    if not telegram_token:
+        telegram_token = input("Введите ваш Telegram Bot Token: ")
+
+    if not steam_api_key:
+        steam_api_key = input("Введите ваш Steam API Key: ")
+
+    save_config()
+
+def save_config():
+    """Сохраняет токен Telegram и ключ Steam API в файл"""
+    config = {
+        "telegram_token": telegram_token,
+        "steam_api_key": steam_api_key
+    }
+    with open(CONFIG_FILE, "w") as file:
+        json.dump(config, file, indent=4)
 
 
 # Function to check Steam status
@@ -20,6 +60,20 @@ def get_steam_status(api_key, steam_id):
             player = data["response"]["players"][0]
             status = player["personastate"]
             return status
+        else:
+            return None
+    else:
+        return None
+
+def get_player_name(api_key, steam_id):
+    url = f"http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key={api_key}&steamids={steam_id}"
+    response = requests.get(url)
+    if response.status_code == 200:
+        data = response.json()
+        if data["response"]["players"]:
+            player = data["response"]["players"][0]
+            name = player["personaname"]
+            return name
         else:
             return None
     else:
@@ -70,10 +124,11 @@ def track_status():
     previous_status = None
     while True:
         current_status = get_steam_status(steam_api_key, steam_id)
+        user_name = get_player_name(steam_api_key, steam_id)
         if current_status is not None:
             if current_status != previous_status:
                 status_text = "Online" if current_status != 0 else "Offline"
-                message = f"Account status ({steam_id}) has been changed: *{status_text}*"
+                message = f"Account status ({user_name}) has been changed: *{status_text}*"
                 send_telegram_message(telegram_token, chat_id, message)
                 print(message)
                 previous_status = current_status
@@ -83,6 +138,8 @@ def track_status():
 
 def main():
     global telegram_token, steam_api_key
+
+    load_config()
 
     # Request the bot token and Steam API Key if they are not already set
     if not telegram_token:
