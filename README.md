@@ -3,7 +3,6 @@
 ## Description
 
 - This is an application that checks the online activity of a Steam profile by its corresponding SteamID.
-- The application still works very poorly, so sometimes the Telegram bot may not show a message about changing the request in Telegram (if you run the script through main.py, then everything should work fine), but everything is displayed correctly in the terminal.
 
 Note: Unfortunately, if the user has set the status to "Invisible", the application will count it as Offline.
 
