@@ -18,7 +18,7 @@ Note: Unfortunately, if the user has set the status to "Invisible", the applicat
 ## Plans for the future
 
 - Graphical interface in Telegram bot
-- Change tracking account
+- ~Change tracking account~
 - Fixing bugs and errors
 - Code optimization
 - More detailed information when tracking (example: replacing the account ID with its nickname in the message about the start of tracking, etc.)
