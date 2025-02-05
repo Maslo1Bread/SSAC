@@ -1,26 +1,19 @@
-import requests
-import time
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+import aiohttp
+import asyncio
 import os
 import json
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 
-
-# Configuration file
-CONFIG_FILE = "config.json"
-
-
-# params
+CONFIG_FILE = "configTEST.json"
 steam_api_key = ""
 telegram_token = ""
-chat_id = None  # The chat ID will be obtained via the command /start
-steam_id = None  # steam_id will be provided by the user
-
+chat_id = None
+steam_id = None
+tracking = False  # Флаг отслеживания
 
 def load_config():
-    """Загружает токен Telegram и ключ Steam API из файла"""
     global telegram_token, steam_api_key
-
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r") as file:
@@ -28,20 +21,18 @@ def load_config():
                 telegram_token = config.get("telegram_token", "")
                 steam_api_key = config.get("steam_api_key", "")
         except (json.JSONDecodeError, FileNotFoundError):
-            print("Ошибка чтения конфигурации, запрос новых данных...")
+            print("Error reading config, requesting new data...")
     else:
-        print("Конфигурационный файл не найден, запрос новых данных...")
+        print("Config not found, requesting new data...")
 
     if not telegram_token:
-        telegram_token = input("Введите ваш Telegram Bot Token: ")
-
+        telegram_token = input("Enter your Telegram Bot Token: ")
     if not steam_api_key:
-        steam_api_key = input("Введите ваш Steam API Key: ")
+        steam_api_key = input("Enter your Steam API Key: ")
 
     save_config()
 
 def save_config():
-    """Сохраняет токен Telegram и ключ Steam API в файл"""
     config = {
         "telegram_token": telegram_token,
         "steam_api_key": steam_api_key
@@ -49,123 +40,99 @@ def save_config():
     with open(CONFIG_FILE, "w") as file:
         json.dump(config, file, indent=4)
 
+async def validate_steam_id(steam_id):
+    """Проверяет валидность SteamID64 или custom URL"""
+    if steam_id.isdigit() and len(steam_id) == 17:
+        return True  # Это корректный SteamID64
+    url = f"http://api.steampowered.com/ISteamUser/ResolveVanityURL/v0001/?key={steam_api_key}&vanityurl={steam_id}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            if response.status == 200:
+                data = await response.json()
+                return "response" in data and "steamid" in data["response"]
+    return False
 
-# Function to check Steam status
-def get_steam_status(api_key, steam_id):
+async def get_steam_status(api_key, steam_id):
+    """Получает статус пользователя в Steam"""
     url = f"http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key={api_key}&steamids={steam_id}"
-    response = requests.get(url)
-    if response.status_code == 200:
-        data = response.json()
-        if data["response"]["players"]:
-            player = data["response"]["players"][0]
-            status = player["personastate"]
-            return status
-        else:
-            return None
-    else:
-        return None
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            if response.status == 200:
+                data = await response.json()
+                if data["response"]["players"]:
+                    player = data["response"]["players"][0]
+                    return player.get("personastate"), player.get("personaname")
+    return None, None
 
-def get_player_name(api_key, steam_id):
-    url = f"http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key={api_key}&steamids={steam_id}"
-    response = requests.get(url)
-    if response.status_code == 200:
-        data = response.json()
-        if data["response"]["players"]:
-            player = data["response"]["players"][0]
-            name = player["personaname"]
-            return name
-        else:
-            return None
-    else:
-        return None
-
-
-# Function of sending a message in Telegram
-def send_telegram_message(token, chat_id, message):
+async def send_telegram_message(token, chat_id, message, reply_markup=None):
+    """Отправляет сообщение в Telegram с возможной клавиатурой"""
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    params = {
-        "chat_id": chat_id,
-        "text": message
-    }
-    requests.get(url, params=params)
+    params = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
+
+    if reply_markup:
+        params["reply_markup"] = json.dumps(reply_markup.to_dict())  # Преобразуем клавиатуру в JSON
+
+    async with aiohttp.ClientSession() as session:
+        await session.get(url, params=params)
 
 
-# Function to handle the /start command
 async def start(update: Update, context):
+    """Команда /start"""
     global chat_id, steam_id
-
     chat_id = update.message.chat_id
-    message = "Send your SteamID to track status"
-
-    # Checking if there is already a steam_id sent
+    message = "Send your SteamID for tracking."
     if steam_id:
-        message = f"\nCurrent Tracked SteamID: {steam_id}"
-
+        message += f"\nCurrent tracked SteamID: {steam_id}"
     await send_telegram_message(telegram_token, chat_id, message)
 
+async def handle_message(update: Update, context):
+    """Обрабатывает ввод SteamID"""
+    global steam_id, tracking
+    user_steam_id = update.message.text.strip()
 
-# Function for processing messages from the user
-def handle_message(update: Update, context):
-    global steam_id
+    if not await validate_steam_id(user_steam_id):
+        await send_telegram_message(telegram_token, update.message.chat_id, "⚠️ Некорректный SteamID. Попробуйте снова.")
+        return
 
-    if not steam_id:
-        steam_id = update.message.text.strip()  # Getting SteamID from the user
-        send_telegram_message(telegram_token, update.message.chat_id, f"Starting to track account status with SteamID: {steam_id}")
+    steam_id = user_steam_id
+    tracking = True  # Устанавливаем флаг отслеживания
+    keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="cancel_tracking")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)  # Создаём клавиатуру
+    
+    await send_telegram_message(telegram_token, chat_id, "🔍 Tracking started", reply_markup)
+    asyncio.create_task(track_status())
 
-        track_status()
+async def cancel_tracking(update: Update, context):
+    """Обрабатывает нажатие кнопки отмены"""
+    global tracking, steam_id
+    tracking = False  # Останавливаем отслеживание
+    steam_id = None  # Сбрасываем SteamID
+    await send_telegram_message(telegram_token, chat_id, "⛔ Tracking canceled.\n\n🔄 Submit a new SteamID for tracking.")
 
-    else:
-        send_telegram_message(telegram_token, update.message.chat_id, "SteamID is already installed. Starting tracking")
-
-        track_status()
-
-
-def track_status():
+async def track_status():
+    """Цикл отслеживания статуса Steam"""
+    global tracking
     previous_status = None
-    while True:
-        current_status = get_steam_status(steam_api_key, steam_id)
-        user_name = get_player_name(steam_api_key, steam_id)
-        if current_status is not None:
-            if current_status != previous_status:
-                status_text = "Online" if current_status != 0 else "Offline"
-                message = f"Account status ({user_name}) has been changed: *{status_text}*"
-                send_telegram_message(telegram_token, chat_id, message)
-                print(message)
+    while tracking:
+        if steam_id:
+            current_status, user_name = await get_steam_status(steam_api_key, steam_id)
+            if current_status is not None and current_status != previous_status:
+                status_text = "🟢 Online" if current_status != 0 else "🔴 Offline"
+                message = f"⚡ Account status ({user_name}) has  been changed: *{status_text}*"
+                await send_telegram_message(telegram_token, chat_id, message)
                 previous_status = current_status
-
-        time.sleep(10)
-
+        await asyncio.sleep(10)
 
 def main():
     global telegram_token, steam_api_key
-
     load_config()
-
-    # Request the bot token and Steam API Key if they are not already set
-    if not telegram_token:
-        telegram_token = input("Your Telegram bot token (tg: @BotFather): ")
-
-    if not steam_api_key:
-        steam_api_key = input("Your Steam API Key (https://steamcommunity.com/dev/apikey): ")
-
-    # Create and launch the application
     application = Application.builder().token(telegram_token).build()
-
-    # Command handlers
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))  # Processing all text messages
-
-    # Running a bot
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(CallbackQueryHandler(cancel_tracking, pattern="cancel_tracking"))
+    print("Bot started")
     application.run_polling()
 
-    # Start tracking account status
-    track_status()
-
-
-
-
 if __name__ == "__main__":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     main()
-
-
-
