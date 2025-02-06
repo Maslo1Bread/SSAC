@@ -22,3 +22,4 @@ Note: Unfortunately, if the user has set the status to "Invisible", the applicat
 - Fixing bugs and errors
 - Code optimization
 - More detailed information when tracking (example: replacing the account ID with its nickname in the message about the start of tracking, etc.)
+- History of IDs
