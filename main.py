@@ -5,7 +5,7 @@ import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 
-CONFIG_FILE = "configTEST.json"
+CONFIG_FILE = "config.json"
 steam_api_key = ""
 telegram_token = ""
 chat_id = None
