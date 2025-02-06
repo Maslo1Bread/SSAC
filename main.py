@@ -10,7 +10,7 @@ steam_api_key = ""
 telegram_token = ""
 chat_id = None
 steam_id = None
-tracking = False  # Флаг отслеживания
+tracking = False
 
 def load_config():
     global telegram_token, steam_api_key
@@ -43,7 +43,7 @@ def save_config():
 async def validate_steam_id(steam_id):
     """Проверяет валидность SteamID64 или custom URL"""
     if steam_id.isdigit() and len(steam_id) == 17:
-        return True  # Это корректный SteamID64
+        return True
     url = f"http://api.steampowered.com/ISteamUser/ResolveVanityURL/v0001/?key={steam_api_key}&vanityurl={steam_id}"
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
@@ -52,8 +52,7 @@ async def validate_steam_id(steam_id):
                 return "response" in data and "steamid" in data["response"]
     return False
 
-async def get_steam_status(api_key, steam_id):
-    """Получает статус пользователя в Steam"""
+async def get_steam_status(api_key, steam_id):
     url = f"http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key={api_key}&steamids={steam_id}"
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
@@ -64,8 +63,7 @@ async def get_steam_status(api_key, steam_id):
                     return player.get("personastate"), player.get("personaname")
     return None, None
 
-async def send_telegram_message(token, chat_id, message, reply_markup=None):
-    """Отправляет сообщение в Telegram с возможной клавиатурой"""
+async def send_telegram_message(token, chat_id, message, reply_markup=None):
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     params = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
 
@@ -76,8 +74,7 @@ async def send_telegram_message(token, chat_id, message, reply_markup=None):
         await session.get(url, params=params)
 
 
-async def start(update: Update, context):
-    """Команда /start"""
+async def start(update: Update, context):
     global chat_id, steam_id
     chat_id = update.message.chat_id
     message = "Send your SteamID for tracking."
@@ -85,28 +82,26 @@ async def start(update: Update, context):
         message += f"\nCurrent tracked SteamID: {steam_id}"
     await send_telegram_message(telegram_token, chat_id, message)
 
-async def handle_message(update: Update, context):
-    """Обрабатывает ввод SteamID"""
+async def handle_message(update: Update, context):
     global steam_id, tracking
     user_steam_id = update.message.text.strip()
 
     if not await validate_steam_id(user_steam_id):
-        await send_telegram_message(telegram_token, update.message.chat_id, "⚠️ Некорректный SteamID. Попробуйте снова.")
+        await send_telegram_message(telegram_token, update.message.chat_id, "⚠️ Incorrect SteamID. Try again.")
         return
 
     steam_id = user_steam_id
-    tracking = True  # Устанавливаем флаг отслеживания
+    tracking = True
     keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="cancel_tracking")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)  # Создаём клавиатуру
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
     await send_telegram_message(telegram_token, chat_id, "🔍 Tracking started", reply_markup)
     asyncio.create_task(track_status())
 
-async def cancel_tracking(update: Update, context):
-    """Обрабатывает нажатие кнопки отмены"""
+async def cancel_tracking(update: Update, context):
     global tracking, steam_id
-    tracking = False  # Останавливаем отслеживание
-    steam_id = None  # Сбрасываем SteamID
+    tracking = False
+    steam_id = None
     await send_telegram_message(telegram_token, chat_id, "⛔ Tracking canceled.\n\n🔄 Submit a new SteamID for tracking.")
 
 async def track_status():
